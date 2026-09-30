@@ -1,0 +1,39 @@
+name: Nightly Nepal news digest
+
+# Fetches a handful of Nepal news RSS feeds and opens a GitHub Issue in
+# THIS repo (scripts/news-digest.mjs), labeled "news-digest" — nothing
+# is scraped into kalakram's datasets automatically. kalakram's own
+# mirror-feedback-issues.yml (the same job that already pulls in
+# user-filed corrections from here) mirrors it in on its next hourly
+# poll, framed as an automated digest rather than a user submission.
+#
+# Runs at 18:00 UTC, which is a fixed 23:45 in Nepal (Nepal has no DST).
+# That reads as 20:00 in Europe while Europe is on summer time, and
+# 19:00 once European clocks fall back in late October — the schedule
+# is anchored to Nepal's clock, not Europe's, since the site is about
+# Nepal.
+#
+# No secrets needed: the RSS feeds are public, and opening the issue
+# uses the workflow's own automatic GITHUB_TOKEN, scoped to this repo.
+
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch: {} # lets us trigger a run manually from the Actions tab to test
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Fetch headlines and open issue
+        run: node scripts/news-digest.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
