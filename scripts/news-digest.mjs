@@ -94,6 +94,62 @@ function formatDate(d) {
   return d.toLocaleString("en-GB", { timeZone: "Asia/Kathmandu", dateStyle: "short", timeStyle: "short" }) + " NPT";
 }
 
+// kalakram's mirror-feedback-issues.yml (hourly) copies every open
+// "news-digest" issue here into kalakram's own tracker and, once reviewed,
+// closes that copy -- but nothing ever closed the original here, so this
+// repo's open-issue list only ever grew, one per night, forever. By the
+// time a new digest issue is being opened, the previous one is at least a
+// day old and has had many hourly mirror polls to be picked up, so it's
+// safe to close now: close every other still-open "news-digest" issue,
+// leaving only the one just created. Best-effort -- a failure here
+// shouldn't fail the run, since the new issue is already live either way.
+async function closeStaleDigests({ owner, repoName, token, keepNumber }) {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  let open;
+  try {
+    const listRes = await fetch(
+      `https://api.github.com/repos/${owner}/${repoName}/issues?state=open&labels=news-digest&per_page=100`,
+      { headers }
+    );
+    if (!listRes.ok) {
+      console.error(`Failed to list open news-digest issues: ${listRes.status} ${listRes.statusText}`);
+      return;
+    }
+    open = (await listRes.json()).filter((i) => !i.pull_request && i.number !== keepNumber);
+  } catch (err) {
+    console.error(`Failed to list open news-digest issues: ${err.message || err}`);
+    return;
+  }
+  for (const issue of open) {
+    try {
+      await fetch(`https://api.github.com/repos/${owner}/${repoName}/issues/${issue.number}/comments`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          body: "Closing now that a newer digest has opened. This one has already had a full day of hourly polls to be mirrored into kalakram's own tracker, which is where it's actually reviewed and acted on -- this copy is kept only as the dated record.",
+        }),
+      });
+      const closeRes = await fetch(`https://api.github.com/repos/${owner}/${repoName}/issues/${issue.number}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ state: "closed", state_reason: "not_planned" }),
+      });
+      if (!closeRes.ok) {
+        console.error(`Failed to close #${issue.number}: ${closeRes.status} ${closeRes.statusText}`);
+        continue;
+      }
+      console.log(`Closed stale digest #${issue.number}`);
+    } catch (err) {
+      console.error(`Failed to close #${issue.number}: ${err.message || err}`);
+    }
+  }
+}
+
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const now = Date.now();
@@ -172,6 +228,8 @@ async function main() {
   }
   const data = await res.json();
   console.log(`Opened ${data.html_url}`);
+
+  await closeStaleDigests({ owner, repoName, token, keepNumber: data.number });
 
   if (results.every((r) => !r.ok)) {
     // Every feed failed — the issue still got created (so the run doesn't
