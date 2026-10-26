@@ -7,6 +7,13 @@ name: Nightly Nepal news digest
 # user-filed corrections from here) mirrors it in on its next hourly
 # poll, framed as an automated digest rather than a user submission.
 #
+# After opening today's issue, the script also closes every other
+# still-open "news-digest" issue in this repo. kalakram's own pipeline
+# closes its mirrored copy once reviewed, but never touches the original
+# here, so without this the open-issue list would just grow by one every
+# night forever. By the time a new digest fires, the previous one has had
+# a full day of hourly mirror polls, so it's safe to close.
+#
 # Runs at 18:00 UTC, which is a fixed 23:45 in Nepal (Nepal has no DST).
 # That reads as 20:00 in Europe while Europe is on summer time, and
 # 19:00 once European clocks fall back in late October — the schedule
