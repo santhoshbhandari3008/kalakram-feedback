@@ -11,6 +11,14 @@
 // anything) is worth turning into an actual cited entry in
 // kalakram's events.json/disasters.json/etc.
 //
+// Each headline also gets a cheap, deterministic topic/tone tag (keyword
+// matching against the title only — see classifyCategory/classifySentiment
+// below), printed right after it. kalakram.org's news.html reads these to
+// chart a "topic share" and "tone" snapshot of each day's digest. It's a
+// wording heuristic, not an AI judgment or a verified assessment of
+// anything — the tags are there to be transparent and auditable, the same
+// way the rest of this project cites its sources.
+//
 // Usage:
 //   node scripts/news-digest.mjs            # fetch + open a real issue (needs GITHUB_TOKEN, GITHUB_REPOSITORY)
 //   node scripts/news-digest.mjs --dry-run   # fetch + print the issue body, no network write, no token needed
@@ -92,6 +100,64 @@ function withinWindow(item, now) {
 function formatDate(d) {
   if (!d || Number.isNaN(d.getTime())) return "(undated)";
   return d.toLocaleString("en-GB", { timeZone: "Asia/Kathmandu", dateStyle: "short", timeStyle: "short" }) + " NPT";
+}
+
+// Word-boundary matching rather than plain substring search -- a naive
+// `.includes("court")` false-matches "courtesy call", and a leading-only
+// \b still would (a word boundary sits right before "court" in "courtesy"
+// too -- the missing piece is the boundary *after* it). Every keyword gets
+// both boundaries by default, so it only matches as a complete word.
+// A trailing "*" opts a keyword OUT of the closing boundary where matching
+// multiple forms of a word is the actual intent (e.g. "injur*" for
+// injured/injuries/injury) -- those are deliberate prefix stems, not bugs.
+function wordMatcher(words) {
+  const res = words.map((w) => {
+    const raw = w.trim();
+    const stem = raw.endsWith("*");
+    const base = (stem ? raw.slice(0, -1) : raw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    return new RegExp(`\\b${base}${stem ? "" : "\\b"}`, "i");
+  });
+  return (text) => res.some((re) => re.test(text));
+}
+
+// Cheap, deterministic, keyword-based classification -- not an AI judgment
+// about what's important, just a topic/tone label for the headlines page's
+// charts. The rule that fired is visible to anyone reading the issue body
+// (the tag is printed right after the headline), so it's auditable the
+// same way the rest of this project's sourcing is. First matching rule
+// wins; checked in an order that puts the more specific topics first so a
+// disaster-relief headline that also mentions politics still reads as a
+// disaster. Six named categories plus "society" as the catch-all for
+// everything else (culture, health, education, lifestyle, opinion) --
+// kalakram.org renders that one in a neutral gray rather than a tagged hue.
+const CATEGORY_RULES = [
+  { key: "disaster", match: wordMatcher(["flood*", "landslide*", "earthquake*", "wildfire*", "fire", "disaster*", "rescue*", "stranded", "collapse*", "storm*", "drown*", "avalanche*", "injur*", "death toll", "displace*", "evacuat*"]) },
+  { key: "crime", match: wordMatcher(["arrest*", "court*", "verdict*", "corrupt*", "fraud*", "probe*", "investigat*", "accus*", "convict*", "jail*", "crime*", "murder*", "assault*", "scam*", "FIR", "police"]) },
+  { key: "sports", match: wordMatcher(["cricket*", "football*", "match*", "tournament*", "team*", "player*", "win", "wins", "winning", "winner", "winners", "won", "beat*", "league*", "NPL", "olympic*", "championship*", "sport*", "athlete*", "medal*"]) },
+  { key: "international", match: wordMatcher(["india*", "china*", "united states", "trump", "embassy*", "embassies", "diplomat*", "visa*", "bilateral*", "foreign ministry", "international*", "united nations", "border talks"]) },
+  { key: "economy", match: wordMatcher(["econom*", "budget*", "trade*", "export*", "import*", "GDP", "inflation*", "market*", "bank*", "remittance*", "tax", "taxes", "taxation", "taxpayer*", "revenue*", "stock*", "NEPSE", "invest*", "rupee*", "tariff*", "industr*", "business*"]) },
+  { key: "politics", match: wordMatcher(["PM", "prime minister*", "parliament*", "minister*", "cabinet*", "president*", "election*", "party", "parties", "congress", "UML", "maoist*", "RSP", "MP", "govern*", "constitution*", "chief minister*", "province assembly", "vote*", "coalition*", "impeach*"]) },
+];
+function classifyCategory(title) {
+  for (const rule of CATEGORY_RULES) {
+    if (rule.match(title)) return rule.key;
+  }
+  return "society";
+}
+
+// A headline that trips both lists reads as "neutral" rather than forcing
+// a call either way -- e.g. a successful disaster rescue (negative-leaning
+// category, positive-leaning tone) correctly nets out as mixed, not wrongly
+// bucketed into either pole. This is tone of a headline's wording, not a
+// judgment about the underlying event.
+const negativeMatch = wordMatcher(["death*", "dies", "died", "kill*", "injur*", "dead", "disaster*", "flood*", "landslide*", "earthquake*", "fire", "crisis", "arrest*", "corrupt*", "fraud*", "protest*", "clash*", "violen*", "accus*", "convict*", "collapse*", "crash*", "attack*", "war", "conflict*", "threat*", "warns", "critical condition", "hunger strike", "stranded", "displace*", "scam*", "impeach*", "resign*", "suicide*", "abuse*", "drought*", "shortage*", "loss", "losses", "declin*", "falls", "drops"]);
+const positiveMatch = wordMatcher(["win", "wins", "winning", "winner", "winners", "won", "victory", "victories", "record*", "launch*", "success*", "approv*", "growth", "recover*", "inaugurat*", "award*", "achieve*", "milestone*", "breakthrough*", "celebrat*", "historic*", "first-ever", "first ever", "boost*", "surge*", "rise*", "improve*", "agreement*", "deal", "deals", "partnership*", "rescue*", "save*", "champion*"]);
+function classifySentiment(title) {
+  const neg = negativeMatch(title);
+  const pos = positiveMatch(title);
+  if (neg && !pos) return "negative";
+  if (pos && !neg) return "positive";
+  return "neutral";
 }
 
 // kalakram's mirror-feedback-issues.yml (hourly) copies every open
@@ -178,7 +244,9 @@ async function main() {
       totalItems += fresh.length;
       sections.push(
         `### ${r.feed.name}\n` +
-          fresh.map((it) => `- [${it.title}](${it.link}) — ${formatDate(it.pubDate)}`).join("\n")
+          fresh
+            .map((it) => `- [${it.title}](${it.link}) — ${formatDate(it.pubDate)} · ${classifyCategory(it.title)} · ${classifySentiment(it.title)}`)
+            .join("\n")
       );
     }
   }
