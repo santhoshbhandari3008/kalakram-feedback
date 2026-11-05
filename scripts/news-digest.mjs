@@ -44,14 +44,21 @@ function extractTag(block, tag) {
 function stripCdata(s) {
   return s.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "").trim();
 }
+// A fixed allowlist missed anything outside it -- Google News titles come
+// through with numeric entities for curly quotes/dashes (PM&#8217;s, for
+// instance), which leaked into headlines as literal "&#8217;" rather than
+// an apostrophe. One pass, one regex, handles every decimal (&#8217;) and
+// hex (&#x2019;) numeric reference plus the handful of named ones RSS
+// actually uses, instead of growing the allowlist one entity at a time.
 function decodeEntities(s) {
-  return s
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;/g, "'")
-    .replace(/&nbsp;/g, " ");
+  return s.replace(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (m, ent) => {
+    if (ent[0] === "#") {
+      const code = ent[1].toLowerCase() === "x" ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+    }
+    const named = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+    return named[ent.toLowerCase()] ?? m;
+  });
 }
 function parseRss(xml) {
   const items = [];
