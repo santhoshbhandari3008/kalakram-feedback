@@ -11,13 +11,17 @@
 // anything) is worth turning into an actual cited entry in
 // kalakram's events.json/disasters.json/etc.
 //
-// Each headline also gets a cheap, deterministic topic/tone tag (keyword
-// matching against the title only — see classifyCategory/classifySentiment
-// below), printed right after it. kalakram.org's news.html reads these to
-// chart a "topic share" and "tone" snapshot of each day's digest. It's a
-// wording heuristic, not an AI judgment or a verified assessment of
-// anything — the tags are there to be transparent and auditable, the same
-// way the rest of this project cites its sources.
+// Each headline also gets a cheap, deterministic topic/tone/province tag
+// (keyword matching against the title only — see classifyCategory/
+// classifySentiment/classifyProvince below), printed right after it.
+// kalakram.org's news.html reads these to chart a "topic share", "tone"
+// and "where" snapshot of each day's digest. It's a wording heuristic,
+// not an AI judgment or a verified assessment of anything — the tags are
+// there to be transparent and auditable, the same way the rest of this
+// project cites its sources. The province tag in particular isn't a new
+// keyword list of its own: it's kalakram.org's own real district-to-
+// province map, so a headline is only tagged when it names an actual
+// district by name.
 //
 // Usage:
 //   node scripts/news-digest.mjs            # fetch + open a real issue (needs GITHUB_TOKEN, GITHUB_REPOSITORY)
@@ -167,6 +171,43 @@ function classifySentiment(title) {
   return "neutral";
 }
 
+// Which province a headline is about, if any -- not a hand-picked keyword
+// list like the two classifiers above, just the real district-to-province
+// map kalakram.org's own atlas already publishes (data/provinces.json
+// there), copied verbatim: a headline is tagged with a province only when
+// one of that province's actual district names appears in the title as a
+// whole word. Most headlines are national in scope and won't name a
+// district at all -- those fall into "unspecified" rather than a guess.
+// Deliberately narrower than it could be (a lot of real headlines name a
+// city, like "Pokhara" or "Birgunj", not the district it's in) in exchange
+// for staying zero-judgment: every match is a literal, real place name,
+// nothing curated or inferred.
+const PROVINCE_DISTRICTS = {
+  koshi: ["Taplejung", "Panchthar", "Ilam", "Jhapa", "Morang", "Sunsari", "Dhankuta", "Tehrathum", "Sankhuwasabha", "Bhojpur", "Solukhumbu", "Okhaldhunga", "Khotang", "Udayapur"],
+  madhesh: ["Saptari", "Siraha", "Dhanusa", "Mahottari", "Sarlahi", "Bara", "Parsa", "Rautahat"],
+  bagmati: ["Sindhuli", "Ramechhap", "Dolakha", "Bhaktapur", "Dhading", "Kathmandu", "Kavre", "Lalitpur", "Nuwakot", "Rasuwa", "Sindhupalchok", "Makwanpur", "Chitwan"],
+  gandaki: ["Gorkha", "Lamjung", "Tanahu", "Syangja", "Kaski", "Manang", "Mustang", "Myagdi", "Parbat", "Baglung"],
+  lumbini: ["Rupandehi", "Kapilbastu", "Arghakhanchi", "Gulmi", "Palpa", "Dang", "Banke", "Bardiya", "Pyuthan", "Rolpa", "Nawalparasi"],
+  karnali: ["Dolpa", "Mugu", "Humla", "Jumla", "Kalikot", "Rukum", "Salyan", "Surkhet", "Dailekh", "Jajarkot"],
+  sudurpashchim: ["Kailali", "Kanchanpur", "Dadeldhura", "Baitadi", "Darchula", "Bajhang", "Bajura", "Achham", "Doti"],
+};
+const DISTRICT_TO_PROVINCE = Object.fromEntries(
+  Object.entries(PROVINCE_DISTRICTS).flatMap(([province, districts]) => districts.map((d) => [d, province]))
+);
+// A couple of district names (Dang, Bara) double as ordinary English
+// words/interjections -- case-insensitive whole-word matching can't tell
+// "Dang district" from "Dang, what a match" if a headline genuinely opens
+// that way. Accepted as-is: real wire-service headlines essentially never
+// do, and the only consequence of a miss here is one headline's dot in a
+// chart, not anything in the site's actual historical record.
+const districtMatchers = Object.entries(DISTRICT_TO_PROVINCE).map(([district, province]) => ({ province, match: wordMatcher([district]) }));
+function classifyProvince(title) {
+  for (const { province, match } of districtMatchers) {
+    if (match(title)) return province;
+  }
+  return "unspecified";
+}
+
 // kalakram's mirror-feedback-issues.yml (hourly) copies every open
 // "news-digest" issue here into kalakram's own tracker and, once reviewed,
 // closes that copy -- but nothing ever closed the original here, so this
@@ -252,7 +293,7 @@ async function main() {
       sections.push(
         `### ${r.feed.name}\n` +
           fresh
-            .map((it) => `- [${it.title}](${it.link}) — ${formatDate(it.pubDate)} · ${classifyCategory(it.title)} · ${classifySentiment(it.title)}`)
+            .map((it) => `- [${it.title}](${it.link}) — ${formatDate(it.pubDate)} · ${classifyCategory(it.title)} · ${classifySentiment(it.title)} · ${classifyProvince(it.title)}`)
             .join("\n")
       );
     }
