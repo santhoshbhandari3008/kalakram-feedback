@@ -20,8 +20,12 @@ name: Nightly Nepal news digest
 # is anchored to Nepal's clock, not Europe's, since the site is about
 # Nepal.
 #
-# No secrets needed: the RSS feeds are public, and opening the issue
-# uses the workflow's own automatic GITHUB_TOKEN, scoped to this repo.
+# Needs one secret: ANTHROPIC_API_KEY, for the day's short English+Nepali
+# summary at the top of the issue (scripts/news-digest.mjs's generateSummary()).
+# Best-effort -- if the secret is missing or the call fails, the digest
+# still opens, just without that section. The RSS feeds themselves are
+# public and opening the issue uses the workflow's own automatic
+# GITHUB_TOKEN, scoped to this repo -- no secret needed for either of those.
 
 on:
   schedule:
@@ -44,3 +48,4 @@ jobs:
         run: node scripts/news-digest.mjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
